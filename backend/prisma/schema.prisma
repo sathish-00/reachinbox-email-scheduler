@@ -1,0 +1,102 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum EmailStatus {
+  SCHEDULED
+  PROCESSING
+  SENT
+  FAILED
+}
+
+model User {
+  id        String   @id @default(uuid())
+  googleId  String   @unique
+  name      String
+  email     String   @unique
+  avatarUrl String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  senders   Sender[]
+  batches   EmailBatch[]
+  slack     SlackConnection?
+}
+
+model Sender {
+  id          String   @id @default(uuid())
+  email       String   @unique
+  displayName String?
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  batches     EmailBatch[]
+  jobs        EmailJob[]
+}
+
+model EmailBatch {
+  id           String   @id @default(uuid())
+  subject      String
+  body         String
+  startTime    DateTime
+  delaySeconds Int
+  hourlyLimit  Int
+  createdAt    DateTime @default(now())
+
+  userId       String
+  senderId     String
+
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sender       Sender   @relation(fields: [senderId], references: [id])
+  jobs         EmailJob[]
+
+  @@index([userId])
+  @@index([senderId])
+  @@index([startTime])
+}
+
+model EmailJob {
+  id          String      @id @default(uuid())
+  recipient   String
+  subject     String
+  body        String
+  scheduledAt DateTime
+  sentAt      DateTime?
+  failedAt    DateTime?
+  error       String?
+  status      EmailStatus @default(SCHEDULED)
+  bullJobId   String?     @unique
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  batchId     String
+  senderId    String
+
+  batch       EmailBatch  @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  sender      Sender      @relation(fields: [senderId], references: [id])
+
+  @@index([status])
+  @@index([scheduledAt])
+  @@index([senderId, status])
+}
+
+model SlackConnection {
+  id          String   @id @default(uuid())
+  teamId      String   @unique
+  teamName    String?
+  accessToken String
+  webhookUrl  String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  userId      String   @unique
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
