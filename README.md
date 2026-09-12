@@ -1,119 +1,758 @@
 # ReachInbox Email Scheduler
 
-A production-oriented email scheduling system built for the ReachInbox Software Development Intern assignment.
+A scalable, persistent email scheduling platform built for the ReachInbox Software Development Intern assignment.
 
-The application allows users to authenticate with Google, configure email senders, upload recipient lists, compose campaigns, schedule emails, control sending speed and hourly limits, and monitor email delivery status.
+The system allows users to authenticate with Google, configure senders, upload recipient lists, create email campaigns, schedule emails, control sending speed and hourly limits, monitor delivery status, receive Slack rate-limit notifications, and search email activity through Elasticsearch.
 
-The system is designed around persistent background processing using BullMQ and Redis, with PostgreSQL as the primary data store and Elasticsearch for email search and indexing.
+---
 
-## Tech Stack
+## ⭐ Key Highlights
 
-### Backend
+- Persistent email scheduling using **BullMQ + Redis**
+- **1,000+ email** bulk campaign scheduling
+- Distributed **hourly rate limiting** using Redis
+- Configurable **worker concurrency**
+- Configurable **minimum delay between emails**
+- **Google OAuth 2.0** authentication
+- **Slack OAuth** integration and rate-limit notifications
+- **Ethereal SMTP** email delivery using Nodemailer
+- **Elasticsearch** indexing and search
+- **Bull Board** live queue monitoring
+- **Restart-safe** scheduled jobs
+- Database-backed email state using **PostgreSQL + Prisma**
+- Idempotent email processing to prevent duplicate sends
+- CSV/TXT recipient upload and automatic email detection
+- Scheduled and Sent email dashboard
 
-- **TypeScript**
-- **Node.js**
-- **Express.js**
-- **Prisma ORM**
-- **PostgreSQL**
-- **BullMQ**
-- **Redis**
-- **Nodemailer**
-- **Ethereal SMTP**
-- **Elasticsearch**
-- **Bull Board**
-- **Passport.js**
-- **Google OAuth 2.0**
-- **Slack OAuth**
-- **Multer**
-- **CSV Parse**
+---
 
-### Frontend
+# Architecture
 
-- **Next.js**
-- **React**
-- **TypeScript**
-- **Tailwind CSS**
-
-### Infrastructure
-
-- **Docker**
-- **PostgreSQL**
-- **Redis**
-- **Elasticsearch**
-
-## Architecture
-
-The application follows a persistent, queue-based architecture where PostgreSQL stores the source-of-truth email and campaign data, while Redis and BullMQ handle persistent scheduling and background execution.
+The application uses PostgreSQL as the primary source of truth, Redis and BullMQ for persistent background scheduling, Elasticsearch for search, and dedicated workers for email delivery.
 
 ```text
-                         ┌─────────────────────┐
-                         │      Next.js UI      │
-                         │  React + TypeScript  │
-                         └──────────┬──────────┘
-                                    │
-                                    │ HTTP / REST API
-                                    ▼
-                         ┌─────────────────────┐
-                         │   Express Backend   │
-                         │     TypeScript      │
-                         └──────┬──────┬───────┘
-                                │      │
-                ┌───────────────┘      └────────────────┐
-                ▼                                        ▼
-       ┌─────────────────┐                     ┌─────────────────┐
-       │   PostgreSQL    │                     │ Redis + BullMQ  │
-       │                 │                     │                 │
-       │ Users           │                     │ Persistent      │
-       │ Senders         │                     │ Scheduling      │
-       │ Campaigns       │                     │ Job Queue       │
-       │ Email Jobs      │                     │ Rate Limiting   │
-       └─────────────────┘                     └────────┬────────┘
-                                                        │
-                                                        ▼
-                                               ┌─────────────────┐
-                                               │  Email Worker   │
-                                               │                 │
-                                               │ Configurable    │
-                                               │ Concurrency     │
-                                               └────────┬────────┘
-                                                        │
-                                                        ▼
-                                               ┌─────────────────┐
-                                               │ Ethereal SMTP   │
-                                               │   Nodemailer    │
-                                               └─────────────────┘
+┌───────────────────────┐
+│       Next.js UI      │
+│ React + TypeScript    │
+│ Tailwind CSS          │
+└───────────┬───────────┘
+            │ REST API
+            ▼
+┌───────────────────────┐
+│   Express Backend     │
+│      TypeScript       │
+│                       │
+│ Auth | Emails | Slack │
+│ Senders | Scheduling  │
+└──────┬─────────┬──────┘
+       │         │
+       │         │
+       ▼         ▼
+┌───────────┐  ┌──────────────────────┐
+│PostgreSQL │  │     Redis + BullMQ   │
+│           │  │                      │
+│ Users     │  │ Persistent Jobs      │
+│ Senders   │  │ Delayed Scheduling   │
+│ Batches   │  │ Rate Limiting        │
+│ Jobs      │  │ Session Storage      │
+└───────────┘  └──────────┬───────────┘
+                          │
+                          ▼
+                ┌─────────────────────┐
+                │    Email Worker     │
+                │      BullMQ         │
+                │                     │
+                │ Configurable        │
+                │ Concurrency         │
+                └─────────┬───────────┘
+                          │
+              ┌───────────┼───────────┐
+              ▼           ▼           ▼
+        ┌──────────┐ ┌──────────┐ ┌──────────────┐
+        │  Redis   │ │ Ethereal │ │Elasticsearch │
+        │   Rate   │ │   SMTP   │ │   Index &    │
+        │ Limiter  │ │Nodemailer│ │    Search    │
+        └──────────┘ └──────────┘ └──────────────┘
 
-              ┌─────────────────────┐
-              │    Elasticsearch    │
-              │                     │
-              │ Email indexing      │
-              │ Status updates      │
-              │ Search              │
-              └─────────────────────┘
 
-              ┌─────────────────────┐
-              │    Slack OAuth      │
-              │                     │
-              │ Rate-limit alerts   │
-              └─────────────────────┘
-
-              ┌─────────────────────┐
-              │    Bull Board       │
-              │                     │
-              │ Queue monitoring    │
+        ┌─────────────────┐      ┌─────────────────┐
+        │    Slack OAuth  │      │    Bull Board   │
+        │                 │      │                 │
+        │ Rate-limit      │      │ Queue Monitoring│
+        │ Notifications   │      │ & Job Status    │
+        └─────────────────┘      └─────────────────┘
               └─────────────────────┘
 ```
-Core Design
-PostgreSQL is the source of truth for users, senders, campaigns, and email jobs.
-Redis provides persistent queue storage and distributed rate-limit state.
-BullMQ schedules and executes email jobs without relying on cron or in-memory timers.
-Email workers process jobs with configurable concurrency.
-Ethereal SMTP is used for email delivery during development and testing.
-Elasticsearch indexes email jobs for searching and keeps status information synchronized.
-Slack provides real-time notifications when an hourly sending limit is reached.
-Bull Board provides a live view of BullMQ queue activity.
 
-## Project Structure
+---
+
+# Core Workflow
+
+The complete email campaign flow is:
+
+```text
+Google Login
+      ↓
+Dashboard
+      ↓
+Select Sender
+      ↓
+Upload CSV/TXT or Enter Recipients
+      ↓
+Detect & Validate Emails
+      ↓
+Create Campaign
+      ↓
+Configure Start Time / Delay / Hourly Limit
+      ↓
+Store Campaign + Email Jobs in PostgreSQL
+      ↓
+Add Jobs to BullMQ
+      ↓
+BullMQ Delayed Scheduling
+      ↓
+Worker Picks Up Job
+      ↓
+Idempotency Check
+      ↓
+Redis Rate-Limit Check
+      ↓
+Reserve Sending Slot
+      ↓
+Apply Minimum Delay
+      ↓
+Send Through Ethereal SMTP
+      ↓
+Update PostgreSQL
+      ↓
+Update Elasticsearch
+      ↓
+Show SENT / FAILED Status
+```
+
+---
+
+# Tech Stack
+
+| Layer | Technology |
+|---|---|
+| Frontend | Next.js, React, TypeScript, Tailwind CSS |
+| Backend | Node.js, Express.js, TypeScript |
+| ORM | Prisma |
+| Database | PostgreSQL |
+| Queue | BullMQ |
+| Queue Storage | Redis |
+| Email | Nodemailer + Ethereal SMTP |
+| Search | Elasticsearch |
+| Authentication | Google OAuth 2.0 |
+| Notifications | Slack OAuth |
+| Queue Monitoring | Bull Board |
+| File Processing | Multer + CSV Parse |
+| Infrastructure | Docker |
+
+---
+
+# Key Engineering Features
+
+## 1. Persistent Scheduling
+
+The application uses BullMQ delayed jobs instead of cron jobs or in-memory timers.
+
+Each email receives its own scheduled execution time based on:
+
+```text
+scheduledAt = startTime + (recipientIndex × delay)
+```
+
+BullMQ stores delayed jobs in Redis, allowing scheduled jobs to survive application or worker restarts.
+
+This avoids relying on:
+
+```text
+setTimeout()
+setInterval()
+cron
+node-cron
+Agenda
+```
+
+for persistent scheduling.
+
+---
+
+## 2. Distributed Hourly Rate Limiting
+
+Hourly rate limiting is implemented using Redis and an atomic Lua script.
+
+The rate limiter maintains shared state for each sender:
+
+```text
+Redis
+ ├── Current hourly count
+ ├── Sending slot
+ └── Notification state
+```
+
+The Lua script atomically:
+
+1. Checks the current hourly count.
+2. Determines whether the hourly limit has been reached.
+3. Reserves a sending slot.
+4. Updates the sender's count.
+5. Maintains the sending delay.
+6. Prevents multiple workers from bypassing the limit.
+
+Because the state is stored in Redis, multiple workers can coordinate against the same rate limit.
+
+### Example
+
+```text
+Hourly Limit = 2
+
+Email 1
+   ↓
+Allowed
+   ↓
+SENT
+
+Email 2
+   ↓
+Allowed
+   ↓
+SENT
+
+Email 3
+   ↓
+Limit reached
+   ↓
+Rescheduled
+   ↓
+BullMQ delayed job
+   ↓
+Next available window
+   ↓
+SENT
+```
+
+Jobs are not intentionally dropped when the hourly limit is reached.
+
+---
+
+## 3. Minimum Delay Between Emails
+
+Each campaign supports a configurable delay between emails.
+
+For example:
+
+```text
+Start Time:       10:00:00
+Delay:            10 seconds
+
+Email 1 → 10:00:00
+Email 2 → 10:00:10
+Email 3 → 10:00:20
+Email 4 → 10:00:30
+```
+
+The worker also uses Redis-backed slot coordination so concurrent workers do not independently ignore the configured delay.
+
+---
+
+## 4. Configurable Worker Concurrency
+
+Worker concurrency is configurable through:
+
+```env
+WORKER_CONCURRENCY="5"
+```
+
+The worker initializes BullMQ with the configured concurrency.
+
+Example:
+
+```text
+Concurrency = 5
+
+Job 1 ─┐
+Job 2 ─┤
+Job 3 ─┼──→ Worker
+Job 4 ─┤
+Job 5 ─┘
+```
+
+Additional workers can be started against the same BullMQ queue when more processing capacity is required.
+
+---
+
+## 5. Idempotent Email Processing
+
+Before sending an email, the worker performs an atomic database state transition:
+
+```text
+SCHEDULED
+    ↓
+PROCESSING
+    ↓
+SENT
+```
+
+If another worker attempts to process the same email job after it has already been claimed, the job is skipped.
+
+This protects against duplicate email sends caused by duplicate processing attempts.
+
+---
+
+## 6. Restart Safety
+
+The system keeps scheduling information in PostgreSQL and BullMQ/Redis rather than process memory.
+
+Example:
+
+```text
+Campaign Scheduled
+       ↓
+BullMQ Delayed Jobs
+       ↓
+Worker Stopped
+       ↓
+Worker Restarted
+       ↓
+BullMQ Restores Processing
+       ↓
+Email Sent
+```
+
+This allows scheduled jobs to continue processing after a worker restart.
+
+---
+
+## 7. Bulk Campaign Processing
+
+The scheduler is designed to handle large recipient lists.
+
+For a 1,000+ recipient campaign:
+
+```text
+1,000+ Recipients
+       ↓
+Recipient Validation
+       ↓
+PostgreSQL createMany()
+       ↓
+BullMQ addBulk()
+       ↓
+Elasticsearch Bulk Index
+       ↓
+Persistent Jobs
+       ↓
+Worker Processing
+```
+
+Bulk operations are used to reduce unnecessary database and queue round trips.
+
+The application was tested with a 1,000-recipient campaign.
+
+---
+
+## 8. Slack Rate-Limit Notifications
+
+Slack is integrated using OAuth.
+
+When a sender reaches the configured hourly limit, the application can send a Slack notification.
+
+The notification contains information such as:
+
+```text
+ReachInbox hourly email limit reached
+
+Sender ID: <sender>
+Hourly limit: <limit> emails
+Reserved/sent in current window: <count>
+Emails will resume around: <time>
+```
+
+A Redis alert key prevents repeated notifications for the same sender during the current rate-limit window.
+
+### Graceful Slack Failure
+
+If Slack is not connected:
+
+```text
+Rate Limit
+    ↓
+No Slack Connection
+    ↓
+Skip Notification
+    ↓
+Continue Email Workflow
+```
+
+If Slack notification delivery fails, the error is logged without causing the email job itself to be permanently failed.
+
+Slack can also be reconnected without redeploying the application.
+
+---
+
+## 9. Elasticsearch
+
+Email jobs are indexed in Elasticsearch using the `email_jobs` index.
+
+Indexed information includes:
+
+- Recipient
+- Subject
+- Body
+- Status
+- Sender ID
+- Batch ID
+- User ID
+- Scheduled time
+- Sent time
+- Failed time
+- Error
+- Created time
+- Updated time
+
+### Indexing Flow
+
+```text
+Email Job Created
+       ↓
+PostgreSQL
+       ↓
+Elasticsearch Index
+       ↓
+Status Changes
+       ↓
+Elasticsearch Update
+```
+
+PostgreSQL remains the primary source of truth.
+
+Elasticsearch provides searchable email-job data.
+
+Search supports fields such as:
+
+- Recipient
+- Subject
+- Body
+- Status
+
+Search results are scoped to the authenticated user.
+
+---
+
+## 10. BullMQ Dashboard
+
+Bull Board provides a live monitoring interface for the email queue.
+
+Dashboard:
+
+```text
+http://localhost:5000/admin/queues
+```
+
+The dashboard provides visibility into:
+
+- Waiting jobs
+- Active jobs
+- Completed jobs
+- Failed jobs
+- Delayed jobs
+
+Queue name:
+
+```text
+email-scheduler
+```
+
+This makes it easy to inspect scheduled and delayed jobs during development and demonstration.
+
+---
+
+# Application Flow
+
+## Authentication
+
+```text
+User
+ ↓
+Google Login
+ ↓
+Google OAuth
+ ↓
+Backend Callback
+ ↓
+Create / Update User
+ ↓
+Redis Session
+ ↓
+Dashboard
+```
+
+The dashboard displays:
+
+- Name
+- Email
+- Avatar
+- Logout
+
+---
+
+## Compose Campaign
+
+Users can create campaigns from the Compose page.
+
+Campaign configuration includes:
+
+- Sender
+- Recipients
+- Subject
+- Body
+- Start time
+- Delay between emails
+- Hourly limit
+
+---
+
+## Recipient Upload
+
+The application supports:
+
+```text
+.csv
+.txt
+```
+
+Email addresses are automatically detected from uploaded files.
+
+The frontend:
+
+1. Reads the uploaded file.
+2. Extracts email addresses.
+3. Removes duplicates.
+4. Displays the detected recipient count.
+5. Sends the cleaned recipient list to the backend.
+
+Example:
+
+```text
+CSV/TXT
+   ↓
+Extract Emails
+   ↓
+Remove Duplicates
+   ↓
+Detected Count
+   ↓
+Schedule Campaign
+```
+
+---
+
+# Dashboard
+
+The dashboard provides an overview of email activity.
+
+## User Information
+
+The authenticated user can see:
+
+- Name
+- Email
+- Avatar
+- Logout
+
+## Email Views
+
+The dashboard contains:
+
+### Scheduled
+
+Displays emails that are waiting to be processed.
+
+### Sent
+
+Displays successfully delivered emails.
+
+Email information includes:
+
+- Recipient
+- Subject
+- Sender
+- Scheduled time
+- Sent time
+- Status
+
+## Sender Management
+
+The dashboard displays configured email senders and their active status.
+
+## Slack Status
+
+The dashboard displays the current Slack connection state and provides connect/reconnect functionality.
+
+## UI States
+
+The frontend includes:
+
+- Loading states
+- Empty states
+- Error states
+- Success feedback
+
+---
+
+# Email Scheduling
+
+When a campaign is submitted:
+
+```text
+Frontend
+   ↓
+Schedule API
+   ↓
+Validate Sender
+   ↓
+Create EmailBatch
+   ↓
+Create EmailJobs
+   ↓
+Add BullMQ Jobs
+   ↓
+Index Elasticsearch
+   ↓
+Return Campaign
+```
+
+Each recipient becomes an individual `EmailJob`.
+
+Each job contains:
+
+```text
+jobId
+recipient
+subject
+body
+senderId
+batchId
+scheduledAt
+```
+
+---
+
+# Email Status Lifecycle
+
+```text
+SCHEDULED
+    │
+    ▼
+PROCESSING
+    │
+    ├───────────────┐
+    ▼               ▼
+  SENT            FAILED
+```
+
+### SCHEDULED
+
+The email is waiting for its scheduled execution time.
+
+### PROCESSING
+
+The worker has claimed the email for processing.
+
+### SENT
+
+The email was successfully delivered through Ethereal SMTP.
+
+### FAILED
+
+The email could not be delivered and the error is stored.
+
+---
+
+# Ethereal SMTP
+
+The application uses Nodemailer with Ethereal SMTP for development and testing.
+
+When an email is successfully sent, Ethereal provides a preview URL.
+
+The worker logs the preview URL:
+
+```text
+Ethereal preview: <preview-url>
+```
+
+This allows the email content to be inspected without sending real production emails.
+
+---
+
+# Database Design
+
+PostgreSQL is the primary source of truth.
+
+Main models:
+
+```text
+User
+ │
+ ├── Sender
+ │
+ ├── EmailBatch
+ │       │
+ │       └── EmailJob
+ │
+ └── SlackConnection
+```
+
+## User
+
+Stores Google-authenticated user information.
+
+## Sender
+
+Stores configured email senders.
+
+## EmailBatch
+
+Represents a campaign containing multiple email jobs.
+
+Stores:
+
+- Subject
+- Body
+- Start time
+- Delay
+- Hourly limit
+- User
+- Sender
+
+## EmailJob
+
+Represents an individual email.
+
+Stores:
+
+- Recipient
+- Subject
+- Body
+- Scheduled time
+- Status
+- Sent time
+- Failed time
+- Error
+- BullMQ job ID
+- Batch
+- Sender
+
+## SlackConnection
+
+Stores connected Slack workspace information for the authenticated user.
+
+---
+
+# Project Structure
 
 ```text
 reachinbox-assignment/
@@ -121,11 +760,32 @@ reachinbox-assignment/
 ├── backend/
 │   ├── src/
 │   │   ├── config/
-│   │   ├── middleware/
+│   │   │   ├── database.ts
+│   │   │   ├── elasticsearch.ts
+│   │   │   ├── env.ts
+│   │   │   ├── passport.ts
+│   │   │   ├── redis.ts
+│   │   │   └── session-store.ts
+│   │   │
 │   │   ├── queues/
+│   │   │   ├── email.queue.ts
+│   │   │   └── email.worker.ts
+│   │   │
 │   │   ├── routes/
+│   │   │   ├── auth.routes.ts
+│   │   │   ├── email.routes.ts
+│   │   │   ├── sender.routes.ts
+│   │   │   └── slack.routes.ts
+│   │   │
 │   │   ├── services/
+│   │   │   ├── elasticsearch.service.ts
+│   │   │   ├── rate-limit.service.ts
+│   │   │   ├── scheduler.service.ts
+│   │   │   ├── slack-notification.service.ts
+│   │   │   └── smtp.service.ts
+│   │   │
 │   │   ├── types/
+│   │   │
 │   │   ├── app.ts
 │   │   └── server.ts
 │   │
@@ -139,7 +799,11 @@ reachinbox-assignment/
 ├── frontend/
 │   ├── app/
 │   │   ├── compose/
+│   │   │   └── page.tsx
+│   │   │
 │   │   ├── dashboard/
+│   │   │   └── page.tsx
+│   │   │
 │   │   ├── page.tsx
 │   │   ├── layout.tsx
 │   │   └── globals.css
@@ -153,62 +817,59 @@ reachinbox-assignment/
 ├── docker-compose.yml
 ├── .gitignore
 ├── package.json
+├── package-lock.json
 └── README.md
 ```
-## Prerequisites
 
-Before running the application, make sure the following are installed:
+---
+
+# Infrastructure
+
+The application uses Docker Compose for local infrastructure.
+
+## Services
+
+### PostgreSQL
+
+```text
+Port: 5432
+Database: reachinbox
+```
+
+### Redis
+
+```text
+Port: 6379
+```
+
+### Elasticsearch
+
+```text
+Port: 9200
+```
+
+The infrastructure configuration is defined in:
+
+```text
+docker-compose.yml
+```
+
+---
+
+# Prerequisites
+
+Install the following:
 
 - Node.js 20+
 - npm
 - Docker Desktop
 - Git
 
-The application uses Docker for the following services:
+Docker Desktop should be running before starting the infrastructure.
 
-- PostgreSQL
-- Redis
-- Elasticsearch
-- ## Infrastructure Setup
+---
 
-The project uses Docker Compose to run the required infrastructure services.
-
-### Start Infrastructure
-
-From the project root:
-
-```bash
-docker compose up -d
-
-This starts:
-
-PostgreSQL on port 5432
-Redis on port 6379
-Elasti csearch on port 9200
-```
-Check Running Services
--docker compose ps
-
-All three services should be running before starting the backend.
-
-Stop Infrastructure
--docker compose down
-
-Docker volumes are configured in docker-compose.yml so PostgreSQL, Redis, and Elasticsearch data can persist across container restarts.
-## Environment Variables
-
-Create the required environment files locally. Do not commit files containing real credentials or secrets.
-
-### Backend
-
-Create:
-
-```text
-## Environment Variables
-
-Create the required environment files locally. Do not commit files containing real credentials or secrets.
-
-### Backend
+# Environment Variables
 
 Create:
 
@@ -216,7 +877,7 @@ Create:
 backend/.env
 ```
 
-Use:
+Example:
 
 ```env
 DATABASE_URL="postgresql://postgres:postgres@localhost:5432/reachinbox"
@@ -242,76 +903,54 @@ SLACK_CLIENT_SECRET="your-slack-client-secret"
 SLACK_REDIRECT_URI="http://localhost:5000/api/slack/callback"
 ```
 
-### Frontend
-
 Create:
 
 ```text
 frontend/.env.local
 ```
 
-Use:
+Example:
 
 ```env
 NEXT_PUBLIC_API_URL="http://localhost:5000"
 ```
 
-Example environment files are included in the repository:
+Never commit real credentials or secrets.
 
-```text
-backend/.env.example
-frontend/.env.local.example
-```
+---
 
-Never commit real OAuth credentials, Slack credentials, database passwords, or session secrets.
-## Database Setup
-
-The application uses PostgreSQL with Prisma ORM.
-
-### Generate Prisma Client
+# Database Setup
 
 From the backend directory:
 
 ```bash
 cd backend
 npm install
+```
+
+Generate Prisma Client:
+
+```bash
 npx prisma generate
 ```
 
-### Run Database Migrations
+Run migrations:
 
 ```bash
 npx prisma migrate dev
 ```
 
-This creates the required database tables and relationships defined in:
-
-```text
-backend/prisma/schema.prisma
-```
-
-### Database Models
-
-The application uses the following main models:
-
-- **User** — Google-authenticated users
-- **Sender** — Configured email senders
-- **EmailBatch** — Email campaign information
-- **EmailJob** — Individual scheduled email jobs and their delivery status
-- **SlackConnection** — Connected Slack workspace information
-
-### Optional: Prisma Studio
-
-To inspect the database through Prisma Studio:
+Optional database inspection:
 
 ```bash
 npx prisma studio
 ```
-## Running the Application
 
-Start the infrastructure services first, then run the backend and frontend separately.
+---
 
-### 1. Start Docker Services
+# Getting Started
+
+## 1. Start Infrastructure
 
 From the project root:
 
@@ -319,13 +958,15 @@ From the project root:
 docker compose up -d
 ```
 
-Verify that PostgreSQL, Redis, and Elasticsearch are running:
+Verify:
 
 ```bash
 docker compose ps
 ```
 
-### 2. Start the Backend API
+---
+
+## 2. Start Backend
 
 Open a terminal:
 
@@ -335,7 +976,7 @@ npm install
 npm run dev
 ```
 
-The backend runs at:
+Backend:
 
 ```text
 http://localhost:5000
@@ -347,20 +988,28 @@ Health check:
 http://localhost:5000/health
 ```
 
-### 3. Start the BullMQ Worker
+---
 
-Open a second terminal:
+## 3. Start Worker
+
+Open another terminal:
 
 ```bash
 cd backend
 npm run worker
 ```
 
-The worker processes scheduled email jobs using the configured concurrency.
+The worker should display:
 
-### 4. Start the Frontend
+```text
+Email worker ready with concurrency: 5
+```
 
-Open a third terminal:
+---
+
+## 4. Start Frontend
+
+Open another terminal:
 
 ```bash
 cd frontend
@@ -368,697 +1017,368 @@ npm install
 npm run dev
 ```
 
-The frontend runs at:
+Frontend:
 
 ```text
 http://localhost:3000
 ```
 
-### 5. BullMQ Dashboard
+---
 
-The live BullMQ queue dashboard is available at:
+# Local URLs
 
-```text
-http://localhost:5000/admin/queues
-```
-
-### Running Services
-
-When the application is running, the local services are:
-
-| Service | URL / Port |
+| Service | URL |
 |---|---|
 | Frontend | `http://localhost:3000` |
-| Backend API | `http://localhost:5000` |
+| Backend | `http://localhost:5000` |
+| Health Check | `http://localhost:5000/health` |
 | BullMQ Dashboard | `http://localhost:5000/admin/queues` |
+| Elasticsearch | `http://localhost:9200` |
 | PostgreSQL | `localhost:5432` |
 | Redis | `localhost:6379` |
-| Elasticsearch | `http://localhost:9200` |
 
-## Authentication
+---
 
-The application uses Google OAuth 2.0 for user authentication.
+# Verification
 
-### Google Login Flow
+The following scenarios were verified during development.
 
-1. The user opens the application.
-2. The user selects **Continue with Google**.
-3. The backend redirects the user to Google OAuth.
-4. Google authenticates the user and redirects back to the configured callback URL.
-5. The backend creates or updates the user in PostgreSQL.
-6. A session is maintained using Express Session with Redis as the session store.
-7. The frontend displays the authenticated user's name, email, and avatar.
+| Test | Result |
+|---|---|
+| Google OAuth login | ✅ Verified |
+| Google logout | ✅ Verified |
+| User profile display | ✅ Verified |
+| CSV upload | ✅ Verified |
+| TXT upload | ✅ Verified |
+| Email detection | ✅ Verified |
+| Duplicate recipient removal | ✅ Verified |
+| Campaign scheduling | ✅ Verified |
+| Ethereal email delivery | ✅ Verified |
+| Scheduled/Sent dashboard | ✅ Verified |
+| BullMQ worker | ✅ Verified |
+| BullMQ Dashboard | ✅ Verified |
+| Redis rate limiting | ✅ Tested |
+| Slack rate-limit notification | ✅ Verified |
+| Elasticsearch indexing | ✅ Verified |
+| Worker restart persistence | ✅ Verified |
+| 1,000-recipient campaign scheduling | ✅ Verified |
+| Backend TypeScript build | ✅ Passed |
+| Frontend production build | ✅ Passed |
+| Docker infrastructure | ✅ Verified |
 
-### Logout
+---
 
-Users can log out from the dashboard. The backend destroys the session and the user is returned to the login page.
+# Large Campaign Test
 
-### Session Persistence
+A 1,000-recipient campaign was used to verify the bulk scheduling path.
 
-Sessions are stored in Redis rather than in application memory, allowing sessions to survive backend process restarts.
-
-## Email Scheduling
-
-The application uses BullMQ with Redis for persistent email scheduling and background processing.
-
-### Scheduling Flow
-
-1. The user authenticates with Google.
-2. The user selects an active sender.
-3. The user enters recipients manually or uploads a CSV/TXT file.
-4. The frontend validates and counts the detected email addresses.
-5. The user configures:
-   - Subject
-   - Body
-   - Start time
-   - Delay between emails
-   - Hourly sending limit
-6. The backend creates an `EmailBatch` in PostgreSQL.
-7. Individual `EmailJob` records are created for each recipient.
-8. Each email job is added to the BullMQ queue with its calculated delay.
-9. The BullMQ worker processes jobs when they become eligible.
-10. The worker applies the configured delay and hourly rate limit before sending.
-11. Successful emails are marked as `SENT`.
-12. Failed emails are marked as `FAILED`.
-13. Email status changes are also reflected in Elasticsearch.
-
-### Persistent Scheduling
-
-Scheduled jobs are stored in Redis through BullMQ rather than in application memory.
-
-This means scheduled jobs remain available if the backend or worker process is restarted. When the worker starts again, BullMQ continues processing the persisted jobs.
-
-The scheduler does not use cron, `setInterval`, Agenda, or another in-memory scheduling mechanism.
-
-### Email Status
-
-Each email job can have one of the following statuses:
-
-- `SCHEDULED`
-- `PROCESSING`
-- `SENT`
-- `FAILED`
-## Worker Concurrency and Throttling
-
-Email delivery is handled by a dedicated BullMQ worker.
-
-### Configurable Concurrency
-
-Worker concurrency is configurable through the environment:
-
-```env
-WORKER_CONCURRENCY="5"
-```
-
-The worker reads this value when it starts and processes multiple jobs concurrently according to the configured limit.
-
-### Minimum Delay
-
-Each campaign supports a configurable delay between individual emails.
-
-The scheduler calculates the intended execution time for each recipient:
+The application successfully:
 
 ```text
-scheduledAt = startTime + (recipientIndex × delay)
+Detected 1,000 recipients
+        ↓
+Created campaign
+        ↓
+Created email jobs in PostgreSQL
+        ↓
+Added jobs to BullMQ
+        ↓
+Indexed jobs in Elasticsearch
+        ↓
+Displayed delayed jobs in Bull Board
 ```
 
-The worker also coordinates sending slots through Redis so multiple workers do not bypass the configured delay.
+The worker processes the campaign according to:
 
-### Processing Flow
+- Worker concurrency
+- Minimum delay
+- Hourly rate limit
+
+The application does not attempt to send all 1,000 emails simultaneously.
+
+---
+
+# Restart Persistence Test
+
+The restart flow was tested using scheduled jobs.
 
 ```text
-BullMQ Job
-    ↓
-Idempotency Check
-    ↓
-Distributed Rate-Limit Check
-    ↓
-Reserve Sending Slot
-    ↓
-Apply Minimum Delay
-    ↓
-Send through Ethereal SMTP
-    ↓
-Update PostgreSQL Status
-    ↓
-Update Elasticsearch
+Schedule Jobs
+     ↓
+BullMQ Delayed Jobs
+     ↓
+Stop Worker
+     ↓
+Start Worker Again
+     ↓
+BullMQ Reads Persisted Jobs
+     ↓
+Jobs Continue Processing
 ```
 
-This design allows the application to control sending speed while still supporting concurrent background workers.
+This verifies that scheduling state is not dependent on the worker process remaining alive.
 
-## Distributed Hourly Rate Limiting
+---
 
-The application implements hourly email rate limiting using Redis and an atomic Lua script.
+# Security
 
-### How It Works
+## Secrets
 
-1. Each sender has an independently tracked hourly limit.
-2. Redis stores the number of reserved email slots for the current hour.
-3. The rate-limit check and slot reservation are performed atomically using a Redis Lua script.
-4. Multiple workers can safely share the same rate-limit state.
-5. When the hourly limit is reached, the email is returned to the `SCHEDULED` state and rescheduled in BullMQ instead of being dropped.
-6. A Redis alert key prevents repeated Slack notifications for the same sender during the current rate-limit window.
-7. When the next hourly window becomes available, queued emails can continue processing.
+Real secrets are stored in environment variables.
 
-### Rate-Limit State
-
-Redis maintains:
-
-- Current hourly email count
-- Sender sending-slot timing
-- Rate-limit notification state
-
-This prevents separate workers from independently exceeding the configured hourly limit.
-
-### Example
+The repository excludes:
 
 ```text
-Hourly Limit = 2
-
-Email 1 → SENT
-Email 2 → SENT
-Email 3 → Rate limit reached
-             ↓
-         Rescheduled
-             ↓
-       BullMQ Delayed Job
-             ↓
-       Next available window
-             ↓
-          Email 3 → SENT
+.env
+.env.local
+.env.*.local
 ```
 
-The rate limiter is backed by Redis rather than process-local memory, making the limit shared across worker instances.
+through `.gitignore`.
 
-## Slack Integration
+## OAuth
 
-The application integrates with Slack using OAuth and stores the connected workspace information in PostgreSQL.
+Google OAuth credentials are never hardcoded into application source code.
 
-### Slack Connection Flow
+Slack OAuth credentials are also provided through environment variables.
 
-1. The user selects **Connect Slack** from the dashboard.
-2. The backend redirects the user to Slack OAuth.
-3. After authorization, Slack redirects back to the configured callback URL.
-4. The backend stores the Slack workspace and access information.
-5. The dashboard displays the Slack connection status.
-6. The user can reconnect Slack without redeploying the application.
+## Sessions
 
-### Rate-Limit Notification
+Authentication sessions use Express Session with Redis-backed storage.
 
-When a sender reaches its configured hourly email limit, the application sends a Slack notification containing:
+The session cookie is configured as HTTP-only.
 
-- Sender information
-- Configured hourly limit
-- Current reserved/sent count
-- Approximate time when sending can resume
+## User Data Isolation
 
-A Redis alert key prevents repeated notifications for the same sender within the current hourly window.
+Users are associated with their own:
 
-### Graceful Failure
+- Senders
+- Campaigns
+- Email jobs
+- Slack connection
 
-If Slack is not connected, the email workflow continues normally and the notification is skipped.
+Elasticsearch searches are filtered by the authenticated user's ID.
 
-If Slack notification delivery fails, the failure is logged but does not cause the email job to be dropped or permanently failed.
+## Email Job Safety
 
-## Ethereal SMTP
+The worker uses an idempotency guard before sending an email to prevent an already claimed or processed job from being sent again.
 
-The application uses Nodemailer with Ethereal SMTP for development and testing email delivery.
+---
 
-### Email Sending
+# Scalability
 
-When a scheduled job becomes eligible:
+The system is designed around horizontally scalable background processing.
 
-1. The worker retrieves the email job from PostgreSQL.
-2. The sender information is loaded from the database.
-3. Nodemailer sends the email through the configured Ethereal SMTP transporter.
-4. The email job is marked as `SENT` after successful delivery.
-5. The `sentAt` timestamp is stored in PostgreSQL.
-6. The Elasticsearch document is updated with the new status.
+## Bulk Database Operations
 
-### Preview Emails
-
-Ethereal provides a preview URL for successfully sent test emails. The worker logs the preview URL so the email content can be inspected during development and demonstration.
-
-### Failure Handling
-
-If SMTP delivery fails:
-
-- The email job is marked as `FAILED`.
-- The failure timestamp is recorded.
-- The error message is stored in PostgreSQL.
-- The Elasticsearch document is updated with the failure status and error.
-
-## Elasticsearch
-
-The application uses Elasticsearch to index email jobs and provide searchable email data.
-
-### Indexing
-
-When email jobs are created, they are indexed in the `email_jobs` Elasticsearch index.
-
-The indexed information includes:
-
-- Recipient
-- Subject
-- Body
-- Status
-- Sender ID
-- Batch ID
-- User ID
-- Scheduled time
-- Sent time
-- Failed time
-- Error information
-- Creation and update timestamps
-
-### Status Updates
-
-The Elasticsearch document is updated when an email job changes state:
+Large campaigns use:
 
 ```text
-SCHEDULED
-    ↓
-SENT
-
-or
-
-SCHEDULED
-    ↓
-FAILED
+Prisma createMany()
 ```
 
-The PostgreSQL database remains the primary source of truth, while Elasticsearch provides search and indexing capabilities.
+instead of inserting every email job with a separate database request.
 
-### Search
+## Bulk Queue Operations
 
-Email jobs can be searched using Elasticsearch across relevant fields such as:
-
-- Recipient
-- Subject
-- Body
-- Status
-
-Search results are filtered by the authenticated user's ID.
-
-## BullMQ Dashboard
-
-The application includes Bull Board for real-time monitoring of the BullMQ email queue.
-
-### Dashboard URL
+BullMQ uses:
 
 ```text
-http://localhost:5000/admin/queues
+addBulk()
 ```
 
-The dashboard provides visibility into:
+to efficiently add many jobs.
 
-- Waiting jobs
-- Active jobs
-- Completed jobs
-- Failed jobs
+## Elasticsearch Bulk Indexing
+
+New email jobs are indexed using Elasticsearch bulk operations.
+
+## Multiple Workers
+
+Multiple BullMQ workers can consume from the same Redis-backed queue.
+
+```text
+                Redis
+                  │
+        ┌─────────┼─────────┐
+        ▼         ▼         ▼
+     Worker 1  Worker 2  Worker 3
+        │         │         │
+        └─────────┼─────────┘
+                  ▼
+             SMTP Server
+```
+
+The shared Redis rate-limit state allows workers to coordinate sending limits.
+
+---
+
+# Design Decisions
+
+## Why BullMQ?
+
+BullMQ provides:
+
+- Persistent jobs
 - Delayed jobs
+- Queue management
+- Worker concurrency
+- Retry infrastructure
+- Redis-backed state
 
-This makes it possible to monitor scheduled email processing and verify delayed or rescheduled jobs during development and testing.
+It is a better fit for persistent email scheduling than process-local timers.
 
-### Queue
+---
 
-The application uses the following BullMQ queue:
+## Why Redis?
 
-```text
-email-scheduler
-```
+Redis is used for:
 
-BullMQ stores the queue state in Redis, allowing scheduled and delayed jobs to survive worker process restarts.
+- BullMQ queue storage
+- Delayed job state
+- Distributed rate limiting
+- Session storage
 
-## Compose Campaign
+Using Redis allows multiple workers to share scheduling and rate-limit state.
 
-The Compose page provides a simple interface for creating and scheduling email campaigns.
+---
 
-### Campaign Configuration
+## Why PostgreSQL?
 
-Users can configure:
+PostgreSQL provides reliable persistent storage for:
 
-- Sender
-- Recipients
-- Email subject
-- Email body
-- Start time
-- Delay between emails
-- Hourly sending limit
+- Users
+- Senders
+- Campaigns
+- Email jobs
+- Slack connections
 
-### Recipient Input
+It is the primary source of truth for business state.
 
-Recipients can be entered manually or uploaded through:
+---
 
-- CSV files
-- TXT files
+## Why Elasticsearch?
 
-The application automatically extracts email addresses from uploaded files, removes duplicate addresses, and displays the detected recipient count before scheduling.
+Elasticsearch is used as a search and indexing layer for email jobs.
 
-### Scheduling
+This keeps search concerns separate from the transactional PostgreSQL database.
 
-After the user submits the campaign:
+---
 
-1. The frontend sends the campaign details to the backend scheduling API.
-2. The backend validates the sender and campaign configuration.
-3. The campaign is stored in PostgreSQL.
-4. Individual email jobs are created for each recipient.
-5. Jobs are added to BullMQ with their calculated execution delays.
-6. Elasticsearch indexes the created email jobs.
+## Why Ethereal?
 
-The Compose page provides loading, success, and error states to give users feedback during scheduling.
+Ethereal provides a safe SMTP testing environment and preview URLs, making it suitable for demonstrating email delivery without sending production emails.
 
-## Dashboard
+---
 
-The dashboard provides an overview of email campaigns and delivery activity.
+## Why Docker?
 
-### User Profile
-
-After Google authentication, the dashboard displays:
-
-- User name
-- Email address
-- Profile avatar
-- Logout option
-
-### Email Tabs
-
-The dashboard provides separate views for:
-
-- **Scheduled** — Emails waiting to be processed
-- **Sent** — Successfully delivered emails
-
-### Sender Management
-
-The dashboard displays configured email senders and their active status.
-
-### Slack Status
-
-The dashboard shows the current Slack connection status and provides options to connect or reconnect Slack.
-
-### Campaign Information
-
-Email records include relevant information such as:
-
-- Recipient
-- Subject
-- Sender
-- Scheduled time
-- Sent time
-- Status
-
-The dashboard also handles loading, empty, and error states to provide clear feedback to the user.
-
-## Bulk Campaign Processing
-
-The scheduler is designed to handle large campaigns without creating one in-memory timer per email.
-
-### Bulk Scheduling
-
-For large recipient lists:
-
-- PostgreSQL uses `createMany()` to create email job records efficiently.
-- BullMQ uses `addBulk()` to enqueue jobs efficiently.
-- Elasticsearch uses bulk indexing for newly created email jobs.
-
-This approach allows the application to schedule 1,000+ email jobs as a single campaign.
-
-### Large Campaign Flow
-
-```text
-1,000+ Recipients
-       ↓
-Recipient Validation
-       ↓
-PostgreSQL createMany()
-       ↓
-BullMQ addBulk()
-       ↓
-Elasticsearch Bulk Index
-       ↓
-Persistent Scheduled Jobs
-       ↓
-BullMQ Workers
-       ↓
-Rate Limit + Delay
-       ↓
-Ethereal SMTP
-```
-
-The worker processes the jobs according to the configured concurrency, minimum delay, and hourly sending limit rather than attempting to send all emails simultaneously.
-
-## Verification
-
-The following application scenarios have been tested during development.
-
-### Authentication
-
-- Google OAuth login tested successfully.
-- Authenticated user information displayed on the dashboard.
-- Logout tested successfully.
-
-### Email Scheduling
-
-- Campaign scheduling tested with multiple recipients.
-- CSV and TXT recipient uploads tested.
-- Recipient email detection and duplicate removal tested.
-- Scheduled and Sent dashboard views tested.
-
-### Email Delivery
-
-- Ethereal SMTP delivery tested successfully.
-- Ethereal preview URLs generated for sent emails.
-- Email status updates reflected in PostgreSQL.
-
-### Queue Processing
-
-- BullMQ worker started successfully with configurable concurrency.
-- BullMQ Dashboard verified.
-- Delayed jobs verified in the queue.
-- Worker restart tested successfully.
-- Persisted scheduled jobs continued processing after worker restart.
-
-### Bulk Scheduling
-
-- A 1,000-recipient campaign was successfully detected and scheduled.
-- Bulk database insertion and BullMQ bulk job creation were verified.
-
-### Rate Limiting
-
-- Hourly rate limiting has been tested with a small campaign.
-- Redis-backed rate-limit state was verified.
-- Slack rate-limit notification was tested successfully.
-
-### Infrastructure
-
-The following services were verified during development:
+Docker provides a consistent local environment for:
 
 - PostgreSQL
 - Redis
 - Elasticsearch
-- BullMQ
-- Backend API
-- Next.js frontend
 
-## Security
+This reduces local setup differences between environments.
 
-The application follows basic security practices for authentication, sessions, credentials, and application data.
+---
 
-### Credentials
+# Design Trade-offs
 
-- Real environment files are excluded from Git using `.gitignore`.
-- OAuth client secrets are stored in environment variables.
-- Slack credentials are stored in environment variables.
-- Database credentials are stored in environment variables.
-- Example environment files contain placeholders instead of real secrets.
+### Fixed Hourly Windows
 
-### Authentication and Sessions
+The current rate limiter uses fixed hourly windows rather than a rolling 60-minute window.
 
-- Google OAuth 2.0 is used for user authentication.
-- Sessions are maintained using Express Session.
-- Session data is stored in Redis instead of application memory.
-- HTTP-only cookies are used for the session cookie.
+This provides a predictable hourly quota and keeps distributed rate-limit coordination simple.
 
-### Data Isolation
-
-Authenticated users are associated with their own senders, campaigns, email jobs, and Slack connections.
-
-Elasticsearch searches are filtered by the authenticated user's ID so that search results remain scoped to the current user.
-
-### Job Safety
-
-Email jobs use unique identifiers for BullMQ jobs and database records.
-
-Before sending an email, the worker performs an idempotency check to prevent an already processed email job from being sent again.
-
-## Scalability
-
-The application is designed to support large email campaigns and multiple worker processes.
-
-### Bulk Operations
-
-Large campaigns use database and queue bulk operations:
-
-- Prisma `createMany()` for email job creation
-- BullMQ `addBulk()` for queue insertion
-- Elasticsearch bulk indexing for search documents
-
-### Horizontal Workers
-
-Additional BullMQ workers can be started against the same Redis-backed queue.
-
-Because queue state and rate-limit state are stored in Redis, workers can share the workload while maintaining centralized scheduling controls.
-
-### Configurable Concurrency
-
-Each worker supports configurable concurrency through:
-
-```env
-WORKER_CONCURRENCY="5"
-```
-
-This allows processing capacity to be adjusted without changing the application code.
-
-### Persistent Infrastructure
-
-PostgreSQL, Redis, and Elasticsearch run as separate Docker services, allowing the application layer and infrastructure services to be restarted independently.
-
-### Large Campaign Handling
-
-The scheduler avoids creating thousands of application-level timers. Instead, execution timing is delegated to BullMQ and Redis, allowing large numbers of scheduled jobs to be persisted and processed by workers.
-
-## Design Trade-offs
-
-### PostgreSQL as the Source of Truth
-
-PostgreSQL is used as the primary source of truth for users, senders, campaigns, and email jobs.
-
-Redis and Elasticsearch are used for specialized responsibilities such as queue processing, distributed rate limiting, and search.
-
-### BullMQ Instead of Cron
-
-BullMQ delayed jobs are used instead of cron-based scheduling.
-
-This keeps scheduling state in Redis and allows jobs to survive worker restarts without relying on an in-memory timer.
-
-### Redis Rate Limiting
-
-The hourly rate limiter uses Redis with an atomic Lua script so multiple workers can coordinate safely.
-
-The current implementation uses fixed hourly windows rather than a rolling 60-minute window. This provides predictable hourly quotas while keeping the distributed implementation simple and efficient.
-
-### Elasticsearch as a Search Layer
+### PostgreSQL as Source of Truth
 
 Elasticsearch is not treated as the primary database.
 
-PostgreSQL remains authoritative, while Elasticsearch provides fast searchable indexing of email jobs.
-
-### Ethereal SMTP
-
-Ethereal SMTP is used because the assignment requires a test SMTP service and it provides preview URLs for verifying email delivery without sending production emails.
+If Elasticsearch is unavailable, PostgreSQL still contains the authoritative email state.
 
 ### Local Development
 
-The application is currently designed to run locally using Docker and Node.js.
+The application is currently designed for local execution using Docker and Node.js.
 
-Deployment is not required for the assignment, so the documented application URLs use `localhost`.
+The assignment does not require a public deployment, so the documented application URLs use `localhost`.
 
-## Feature Summary
+---
 
-| Feature | Status |
-|---|---|
-| Google OAuth 2.0 authentication | Implemented |
-| User profile and logout | Implemented |
-| Multiple email senders | Implemented |
-| CSV/TXT recipient upload | Implemented |
-| Recipient detection and deduplication | Implemented |
-| Campaign scheduling | Implemented |
-| Configurable email delay | Implemented |
-| Configurable hourly rate limit | Implemented |
-| Redis-backed distributed rate limiting | Implemented |
-| Persistent BullMQ scheduling | Implemented |
-| Worker concurrency configuration | Implemented |
-| Idempotent email processing | Implemented |
-| Ethereal SMTP delivery | Implemented |
-| Slack OAuth integration | Implemented |
-| Slack rate-limit notifications | Implemented |
-| Elasticsearch indexing and search | Implemented |
-| Scheduled/Sent dashboard | Implemented |
-| BullMQ monitoring dashboard | Implemented |
-| Bulk scheduling for 1,000+ emails | Verified |
-| Worker restart persistence | Verified |
-| Docker-based infrastructure | Implemented |
+# Application Screenshots
 
-## Local Development
+Screenshots can be added here to make the project easier to understand visually.
 
-The application is designed to run locally using Docker and Node.js.
+Recommended screenshots:
 
-### Frontend
+### Login
 
-```text
-http://localhost:3000
-```
+Show the Google authentication screen or application login page.
 
-### Backend API
+### Dashboard
 
-```text
-http://localhost:5000
-```
+Show:
 
-### Backend Health Check
+- User profile
+- Scheduled emails
+- Sent emails
+- Senders
+- Slack status
 
-```text
-http://localhost:5000/health
-```
+### Compose Campaign
+
+Show:
+
+- Sender selection
+- CSV/TXT upload
+- Detected recipient count
+- Subject
+- Body
+- Start time
+- Delay
+- Hourly limit
 
 ### BullMQ Dashboard
 
-```text
-http://localhost:5000/admin/queues
-```
+Show:
 
-### Elasticsearch
+- Queue name
+- Delayed jobs
+- Completed jobs
+- Active jobs
+- Failed jobs
 
-```text
-http://localhost:9200
-```
+### Slack Notification
 
-### PostgreSQL
+Show the Slack rate-limit notification.
 
-```text
-localhost:5432
-```
+---
 
-### Redis
+# Demo Flow
 
-```text
-localhost:6379
-```
-## Demo Flow
+The recommended demonstration flow is:
 
-The following flow can be used to demonstrate the main functionality of the application.
-
-### 1. Start Infrastructure
+## 1. Start Infrastructure
 
 ```bash
 docker compose up -d
 ```
 
-### 2. Start Backend and Worker
+## 2. Start Backend
 
 ```bash
 cd backend
 npm run dev
 ```
 
-In another terminal:
+## 3. Start Worker
 
 ```bash
 cd backend
 npm run worker
 ```
 
-### 3. Start Frontend
+## 4. Start Frontend
 
 ```bash
 cd frontend
@@ -1071,101 +1391,157 @@ Open:
 http://localhost:3000
 ```
 
-### 4. Authenticate
+## 5. Google Authentication
 
-- Sign in using Google OAuth.
-- Verify the user's name, email, and avatar on the dashboard.
+- Sign in using Google.
+- Show the authenticated user's name, email, and avatar.
 
-### 5. Configure Campaign
+## 6. Dashboard
 
-- Open the Compose page.
-- Select a sender.
-- Upload a CSV/TXT recipient list.
-- Verify the detected email count.
-- Enter the subject and body.
-- Configure the start time, delay, and hourly limit.
-- Schedule the campaign.
+Show:
 
-### 6. Monitor Jobs
+- Sender information
+- Scheduled tab
+- Sent tab
+- Slack connection
 
-Open the BullMQ dashboard:
+## 7. Compose Campaign
+
+- Select sender.
+- Upload CSV/TXT.
+- Show detected recipient count.
+- Enter subject and body.
+- Configure start time.
+- Configure delay.
+- Configure hourly limit.
+- Schedule campaign.
+
+## 8. BullMQ Dashboard
+
+Open:
 
 ```text
 http://localhost:5000/admin/queues
 ```
 
-Show scheduled, delayed, active, completed, and failed jobs.
+Show delayed and processing jobs.
 
-### 7. Verify Email Delivery
+## 9. Email Delivery
 
-Use the Ethereal preview URL printed by the worker to inspect successfully sent emails.
+Show the Ethereal preview URL from the worker and open the preview.
 
-### 8. Demonstrate Persistence
+## 10. Rate Limiting
 
-Schedule jobs for a future time, stop the worker, restart it, and show that BullMQ continues processing the persisted jobs.
+Configure a small hourly limit and demonstrate that additional jobs are delayed/rescheduled instead of being dropped.
 
-### 9. Demonstrate Rate Limiting
+## 11. Slack
 
-Configure a low hourly limit and show that jobs are delayed/rescheduled when the limit is reached rather than being dropped.
+Show the Slack rate-limit notification when the configured limit is reached.
 
-### 10. Demonstrate Slack Notification
+## 12. Restart Persistence
 
-Connect Slack and trigger the configured hourly limit to show the rate-limit notification.
+Stop the worker and restart it while scheduled jobs remain in BullMQ.
 
-### 11. Demonstrate Bulk Scheduling
+Show that the jobs continue processing after restart.
 
-Upload a 1,000-recipient list and show that the application detects and schedules the large campaign successfully.
+## 13. Bulk Campaign
 
-## Build Verification
+Show the 1,000-recipient campaign and the corresponding delayed jobs in Bull Board.
 
-The project was verified locally during development.
+---
 
-### Backend
+# Feature Summary
+
+| Feature | Status |
+|---|---|
+| Google OAuth 2.0 | ✅ |
+| User profile | ✅ |
+| Logout | ✅ |
+| Multiple senders | ✅ |
+| CSV upload | ✅ |
+| TXT upload | ✅ |
+| Recipient detection | ✅ |
+| Recipient deduplication | ✅ |
+| Campaign scheduling | ✅ |
+| Configurable start time | ✅ |
+| Configurable email delay | ✅ |
+| Configurable hourly limit | ✅ |
+| Redis distributed rate limiting | ✅ |
+| BullMQ persistent scheduling | ✅ |
+| Configurable worker concurrency | ✅ |
+| Idempotent job processing | ✅ |
+| Ethereal SMTP | ✅ |
+| Slack OAuth | ✅ |
+| Slack rate-limit notifications | ✅ |
+| Elasticsearch indexing | ✅ |
+| Elasticsearch search | ✅ |
+| Scheduled email dashboard | ✅ |
+| Sent email dashboard | ✅ |
+| BullMQ Dashboard | ✅ |
+| 1,000+ bulk scheduling | ✅ |
+| Worker restart persistence | ✅ |
+| Docker infrastructure | ✅ |
+
+---
+
+# Build Verification
+
+## Backend
 
 ```bash
 cd backend
 npm run build
 ```
 
-The TypeScript backend builds successfully without compilation errors.
+The backend TypeScript build completes successfully.
 
-### Frontend
+## Frontend
 
 ```bash
 cd frontend
 npm run build
 ```
 
-The Next.js application builds successfully.
+The Next.js production build completes successfully.
 
-### Infrastructure
+---
 
-The following services were verified locally:
+# Submission Notes
 
-- PostgreSQL
-- Redis
+The project is intended to be submitted as a private GitHub repository.
+
+The repository should contain:
+
+```text
+backend/
+frontend/
+docker-compose.yml
+.gitignore
+README.md
+package.json
+package-lock.json
+```
+
+The README documents:
+
+- Project architecture
+- Local setup
+- Environment variables
+- Database setup
+- Scheduling architecture
+- Worker concurrency
+- Rate limiting
+- Slack integration
 - Elasticsearch
+- Testing and verification
+- Demo flow
 
-### Queue Worker
+A short demo video can be used to demonstrate the main application workflow within the assignment's required time limit.
 
-The BullMQ worker starts successfully with the configured concurrency:
+---
 
-```text
-Email worker ready with concurrency: 5
-```
-
-### Health Check
-
-The backend health endpoint is available at:
-
-```text
-http://localhost:5000/health
-```
-
-and confirms that the backend is running.
-
-## Author
+# Author
 
 **Sathish**
 
-This project was developed as part of the ReachInbox Software Development Intern assignment.
+ReachInbox Software Development Intern Assignment
