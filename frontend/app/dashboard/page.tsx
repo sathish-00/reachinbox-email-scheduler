@@ -197,8 +197,21 @@ export default function Dashboard() {
   useEffect(() => {
     void loadDashboard();
 
-    const statsInterval = window.setInterval(() => {
-      void loadEmailStats();
+    /*
+     * Refresh the complete dashboard every 5 seconds.
+     *
+     * This updates:
+     * - Scheduled emails
+     * - Sent emails
+     * - Email statistics
+     * - Senders
+     * - Slack connection status
+     *
+     * This is important because a campaign can be created
+     * from the Compose page while this dashboard is already open.
+     */
+    const dashboardInterval = window.setInterval(() => {
+      void loadDashboard();
     }, 5000);
 
     const params = new URLSearchParams(
@@ -230,7 +243,7 @@ export default function Dashboard() {
     }
 
     return () => {
-      window.clearInterval(statsInterval);
+      window.clearInterval(dashboardInterval);
     };
   }, []);
 
