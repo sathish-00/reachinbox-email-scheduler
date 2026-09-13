@@ -1,3 +1,4 @@
+
 # ReachInbox Email Scheduler
 
 A scalable, persistent email scheduling platform built for the ReachInbox Software Development Intern assignment.
@@ -5,6 +6,13 @@ A scalable, persistent email scheduling platform built for the ReachInbox Softwa
 The system allows users to authenticate with Google, configure senders, upload recipient lists, create email campaigns, schedule emails, control sending speed and hourly limits, monitor delivery status, receive Slack rate-limit notifications, and search email activity through Elasticsearch.
 
 ---
+
+##  Live 
+
+- **Frontend / Application:** https://reachinbox-email-scheduler-2-s89w.onrender.com
+- **Backend API:** https://reachinbox-email-scheduler-4qs5.onrender.com
+- **BullMQ Dashboard:** https://reachinbox-email-scheduler-4qs5.onrender.com/admin/queues
+- **Health Check:** https://reachinbox-email-scheduler-4qs5.onrender.com/health
 
 ## ⭐ Key Highlights
 
@@ -672,6 +680,26 @@ The email could not be delivered and the error is stored.
 
 ---
 
+## Prisma / PostgreSQL
+
+Prisma Studio was used to verify PostgreSQL data during development, including users, senders, email batches, and scheduled email jobs.
+
+### Prisma Email Jobs
+
+<img width="1526" height="817" alt="Prisma Email Jobs" src="https://github.com/user-attachments/assets/92ff14ab-eadf-4ce3-a7e6-b1d487e188a1" />
+
+### Prisma Email Batches
+
+<img width="1533" height="775" alt="Prisma Email Batches" src="https://github.com/user-attachments/assets/39c6727e-8a89-4e41-be42-d2df1e93988c" />
+
+### Prisma Senders
+
+<img width="1533" height="862" alt="Prisma Senders" src="https://github.com/user-attachments/assets/2605180a-ed4d-4625-9a32-f93c52ec5bd0" />
+
+### Prisma Users
+
+<img width="1528" height="773" alt="Prisma Users" src="https://github.com/user-attachments/assets/395a4709-16d4-4f8e-869d-a6da0d2117bf" />
+
 # Ethereal SMTP
 
 The application uses Nodemailer with Ethereal SMTP for development and testing.
@@ -705,6 +733,12 @@ User
  │
  └── SlackConnection
 ```
+## Database
+
+- **Database:** PostgreSQL
+- **ORM:** Prisma
+- **Schema:** `backend/prisma/schema.prisma`
+- **Migrations:** `backend/prisma/migrations/`
 
 ## User
 
