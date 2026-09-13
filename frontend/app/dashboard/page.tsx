@@ -35,6 +35,14 @@ interface SlackConnection {
   webhookConnected: boolean;
 }
 
+interface EmailStats {
+  scheduled: number;
+  processing: number;
+  sent: number;
+  failed: number;
+  total: number;
+}
+
 type CampaignTab = "scheduled" | "sent";
 
 const API_URL =
@@ -46,6 +54,14 @@ export default function Dashboard() {
   const [scheduledEmails, setScheduledEmails] = useState<EmailJob[]>([]);
   const [sentEmails, setSentEmails] = useState<EmailJob[]>([]);
 
+  const [emailStats, setEmailStats] = useState<EmailStats>({
+    scheduled: 0,
+    processing: 0,
+    sent: 0,
+    failed: 0,
+    total: 0,
+  });
+
   const [activeTab, setActiveTab] =
     useState<CampaignTab>("scheduled");
 
@@ -56,6 +72,7 @@ export default function Dashboard() {
   const [senderLoading, setSenderLoading] = useState(true);
   const [senderCreating, setSenderCreating] = useState(false);
   const [slackLoading, setSlackLoading] = useState(true);
+  const [statsLoading, setStatsLoading] = useState(true);
 
   const [error, setError] = useState("");
   const [senderError, setSenderError] = useState("");
@@ -65,89 +82,129 @@ export default function Dashboard() {
   const [senderEmail, setSenderEmail] = useState("");
   const [displayName, setDisplayName] = useState("");
 
-  useEffect(() => {
-    const loadDashboard = async () => {
-      try {
-        const [
-          userResponse,
-          senderResponse,
-          scheduledResponse,
-          sentResponse,
-          slackResponse,
-        ] = await Promise.all([
-          fetch(`${API_URL}/api/auth/me`, {
-            credentials: "include",
-          }),
-
-          fetch(`${API_URL}/api/senders`, {
-            credentials: "include",
-          }),
-
-          fetch(`${API_URL}/api/emails/scheduled`, {
-            credentials: "include",
-          }),
-
-          fetch(`${API_URL}/api/emails/sent`, {
-            credentials: "include",
-          }),
-
-          fetch(`${API_URL}/api/slack/connection`, {
-            credentials: "include",
-          }),
-        ]);
-
-        if (!userResponse.ok) {
-          throw new Error("Unable to load user");
+  const loadEmailStats = async () => {
+    try {
+      const response = await fetch(
+        `${API_URL}/api/emails/stats`,
+        {
+          credentials: "include",
+          cache: "no-store",
         }
+      );
 
-        if (!senderResponse.ok) {
-          throw new Error("Unable to load senders");
-        }
-
-        if (!scheduledResponse.ok) {
-          throw new Error("Unable to load scheduled emails");
-        }
-
-        if (!sentResponse.ok) {
-          throw new Error("Unable to load sent emails");
-        }
-
-        const userData = await userResponse.json();
-        const senderData = await senderResponse.json();
-        const scheduledData =
-          await scheduledResponse.json();
-        const sentData = await sentResponse.json();
-
-        setUser(userData.data);
-        setSenders(senderData.data);
-        setScheduledEmails(scheduledData.data);
-        setSentEmails(sentData.data);
-
-        if (slackResponse.ok) {
-          const slackData = await slackResponse.json();
-
-          if (slackData.connected) {
-            setSlackConnection(slackData.data);
-          } else {
-            setSlackConnection(null);
-          }
-        }
-      } catch (err) {
-        setError(
-          err instanceof Error
-            ? err.message
-            : "Something went wrong"
-        );
-      } finally {
-        setLoading(false);
-        setSenderLoading(false);
-        setSlackLoading(false);
+      if (!response.ok) {
+        throw new Error("Unable to load email statistics");
       }
-    };
 
-    loadDashboard();
+      const data = await response.json();
 
-    const params = new URLSearchParams(window.location.search);
+      if (data.success && data.stats) {
+        setEmailStats(data.stats);
+      }
+    } catch (err) {
+      console.error("Failed to load email stats:", err);
+    } finally {
+      setStatsLoading(false);
+    }
+  };
+
+  const loadDashboard = async () => {
+    try {
+      const [
+        userResponse,
+        senderResponse,
+        scheduledResponse,
+        sentResponse,
+        slackResponse,
+      ] = await Promise.all([
+        fetch(`${API_URL}/api/auth/me`, {
+          credentials: "include",
+          cache: "no-store",
+        }),
+
+        fetch(`${API_URL}/api/senders`, {
+          credentials: "include",
+          cache: "no-store",
+        }),
+
+        fetch(`${API_URL}/api/emails/scheduled`, {
+          credentials: "include",
+          cache: "no-store",
+        }),
+
+        fetch(`${API_URL}/api/emails/sent`, {
+          credentials: "include",
+          cache: "no-store",
+        }),
+
+        fetch(`${API_URL}/api/slack/connection`, {
+          credentials: "include",
+          cache: "no-store",
+        }),
+      ]);
+
+      if (!userResponse.ok) {
+        throw new Error("Unable to load user");
+      }
+
+      if (!senderResponse.ok) {
+        throw new Error("Unable to load senders");
+      }
+
+      if (!scheduledResponse.ok) {
+        throw new Error("Unable to load scheduled emails");
+      }
+
+      if (!sentResponse.ok) {
+        throw new Error("Unable to load sent emails");
+      }
+
+      const userData = await userResponse.json();
+      const senderData = await senderResponse.json();
+      const scheduledData =
+        await scheduledResponse.json();
+      const sentData = await sentResponse.json();
+
+      setUser(userData.data);
+      setSenders(senderData.data);
+      setScheduledEmails(scheduledData.data);
+      setSentEmails(sentData.data);
+
+      if (slackResponse.ok) {
+        const slackData = await slackResponse.json();
+
+        if (slackData.connected) {
+          setSlackConnection(slackData.data);
+        } else {
+          setSlackConnection(null);
+        }
+      }
+
+      await loadEmailStats();
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Something went wrong"
+      );
+    } finally {
+      setLoading(false);
+      setSenderLoading(false);
+      setSlackLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadDashboard();
+
+    const statsInterval = window.setInterval(() => {
+      void loadEmailStats();
+    }, 5000);
+
+    const params = new URLSearchParams(
+      window.location.search
+    );
+
     const slackStatus = params.get("slack");
 
     if (slackStatus === "connected") {
@@ -171,6 +228,10 @@ export default function Dashboard() {
         "/dashboard"
       );
     }
+
+    return () => {
+      window.clearInterval(statsInterval);
+    };
   }, []);
 
   const handleCreateSender = async (
@@ -449,7 +510,9 @@ export default function Dashboard() {
             </p>
 
             <p className="mt-2 text-3xl font-bold text-gray-900">
-              {scheduledEmails.length}
+              {statsLoading
+                ? "..."
+                : emailStats.scheduled}
             </p>
 
             <p className="mt-1 text-xs text-gray-400">
@@ -464,7 +527,9 @@ export default function Dashboard() {
             </p>
 
             <p className="mt-2 text-3xl font-bold text-gray-900">
-              {sentEmails.length}
+              {statsLoading
+                ? "..."
+                : emailStats.sent}
             </p>
 
             <p className="mt-1 text-xs text-gray-400">
@@ -623,7 +688,7 @@ export default function Dashboard() {
                 Scheduled
 
                 <span className="ml-2 rounded-full bg-gray-100 px-2 py-0.5 text-xs">
-                  {scheduledEmails.length}
+                  {emailStats.scheduled}
                 </span>
               </button>
 
@@ -641,7 +706,7 @@ export default function Dashboard() {
                 Sent
 
                 <span className="ml-2 rounded-full bg-gray-100 px-2 py-0.5 text-xs">
-                  {sentEmails.length}
+                  {emailStats.sent}
                 </span>
               </button>
             </div>
