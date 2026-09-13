@@ -789,6 +789,11 @@ reachinbox-assignment/
 │   │   ├── app.ts
 │   │   └── server.ts
 │   │
+│   ├── tests/
+│   │   ├── scheduler.test.ts
+│   │   ├── rate-limit.test.ts
+│   │   └── idempotency.test.ts
+│   │
 │   ├── prisma/
 │   │   └── schema.prisma
 │   │
@@ -821,7 +826,6 @@ reachinbox-assignment/
 └── README.md
 ```
 
----
 
 # Infrastructure
 
@@ -1067,6 +1071,22 @@ The following scenarios were verified during development.
 | Docker infrastructure | ✅ Verified |
 
 ---
+
+# Automated Tests
+
+The backend includes Jest unit tests covering core scheduling, rate-limiting, and email job idempotency logic.
+
+Run the test suite with:
+
+```bash
+cd backend
+npm test
+
+```
+
+Test Suites: 3 passed, 3 total
+Tests:       5 passed, 5 total
+
 
 # Large Campaign Test
 
