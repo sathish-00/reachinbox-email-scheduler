@@ -15,9 +15,9 @@ const startServer = async (): Promise<void> => {
     await connectElasticsearch();
     await ensureEmailIndex();
 
-    app.listen(env.PORT, () => {
+    app.listen(env.PORT, "0.0.0.0", () => {
       console.log(
-        `Server running on http://localhost:${env.PORT}`
+        `Server running on http://0.0.0.0:${env.PORT}`
       );
     });
   } catch (error) {

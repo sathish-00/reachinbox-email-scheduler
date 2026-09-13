@@ -18,6 +18,7 @@ export const env = {
 
   ELASTICSEARCH_URL:
     process.env.ELASTICSEARCH_URL || "http://localhost:9200",
+  ELASTICSEARCH_API_KEY: process.env.ELASTICSEARCH_API_KEY || "",
 
   PORT: Number(process.env.PORT || 5000),
 
