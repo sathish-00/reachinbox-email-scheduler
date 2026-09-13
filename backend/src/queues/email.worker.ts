@@ -176,6 +176,15 @@ const processEmailJob = async (
     });
 
     /*
+     * Diagnostic confirmation:
+     * This proves that PostgreSQL successfully persisted
+     * the SENT status before BullMQ completes the job.
+     */
+    console.log(
+      `DATABASE UPDATED TO SENT: ${jobId}`
+    );
+
+    /*
      * Elasticsearch is a secondary index.
      *
      * If indexing fails, log the error but do NOT throw.
