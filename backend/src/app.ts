@@ -17,6 +17,10 @@ import slackRoutes from "./routes/slack.routes";
 
 const app = express();
 
+if (process.env.NODE_ENV === "production") {
+  app.set("trust proxy", 1);
+}
+
 // Bull Board
 const serverAdapter = new ExpressAdapter();
 
@@ -30,7 +34,7 @@ createBullBoard({
 // CORS
 app.use(
   cors({
-    origin: "http://localhost:3000",
+    origin: process.env.FRONTEND_URL || "http://localhost:3000",
     credentials: true,
   })
 );
@@ -50,7 +54,8 @@ app.use(
     saveUninitialized: false,
     cookie: {
       httpOnly: true,
-      secure: false,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
       maxAge: 24 * 60 * 60 * 1000,
     },
   })
