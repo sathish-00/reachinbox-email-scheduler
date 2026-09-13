@@ -8,6 +8,10 @@ import {
 } from "../services/slack.service";
 import { AuthUser } from "../types/auth.types";
 
+const FRONTEND_URL =
+  process.env.FRONTEND_URL ||
+  "http://localhost:3000";
+
 export const connectSlackController = (
   req: Request,
   res: Response
@@ -41,14 +45,14 @@ export const slackCallbackController = async (
 
     if (error) {
       res.redirect(
-        "http://localhost:3000/dashboard?slack=cancelled"
+        `${FRONTEND_URL}/dashboard?slack=cancelled`
       );
       return;
     }
 
     if (typeof code !== "string" || typeof state !== "string") {
       res.redirect(
-        "http://localhost:3000/dashboard?slack=failed"
+        `${FRONTEND_URL}/dashboard?slack=failed`
       );
       return;
     }
@@ -58,7 +62,7 @@ export const slackCallbackController = async (
 
     if (!savedState || !userId || state !== savedState) {
       res.redirect(
-        "http://localhost:3000/dashboard?slack=failed"
+        `${FRONTEND_URL}/dashboard?slack=failed`
       );
       return;
     }
@@ -71,13 +75,13 @@ export const slackCallbackController = async (
     delete req.session.slackOAuthUserId;
 
     res.redirect(
-      "http://localhost:3000/dashboard?slack=connected"
+      `${FRONTEND_URL}/dashboard?slack=connected`
     );
   } catch (error) {
     console.error("Slack OAuth callback failed:", error);
 
     res.redirect(
-      "http://localhost:3000/dashboard?slack=failed"
+      `${FRONTEND_URL}/dashboard?slack=failed`
     );
   }
 };
