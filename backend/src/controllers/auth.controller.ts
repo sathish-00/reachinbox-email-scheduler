@@ -1,17 +1,21 @@
 import { Request, Response } from "express";
 
+const FRONTEND_URL =
+  process.env.FRONTEND_URL ||
+  "http://localhost:3000";
+
 export const googleCallbackController = (
   req: Request,
   res: Response
 ): void => {
   if (!req.user) {
     res.redirect(
-      "http://localhost:3000/login?error=google_auth_failed"
+      `${FRONTEND_URL}/?error=google_auth_failed`
     );
     return;
   }
 
-  res.redirect("http://localhost:3000/dashboard");
+  res.redirect(`${FRONTEND_URL}/dashboard`);
 };
 
 export const getCurrentUserController = (
