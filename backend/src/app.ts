@@ -17,6 +17,8 @@ import slackRoutes from "./routes/slack.routes";
 
 const app = express();
 
+// Render runs the application behind a proxy.
+// This is required for secure production session cookies.
 if (process.env.NODE_ENV === "production") {
   app.set("trust proxy", 1);
 }
@@ -34,7 +36,9 @@ createBullBoard({
 // CORS
 app.use(
   cors({
-    origin: process.env.FRONTEND_URL || "http://localhost:3000",
+    origin:
+      process.env.FRONTEND_URL ||
+      "http://localhost:3000",
     credentials: true,
   })
 );
